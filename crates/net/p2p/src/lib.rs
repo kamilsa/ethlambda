@@ -4,6 +4,8 @@ use std::{
     time::Duration,
 };
 
+use rand::{seq::SliceRandom, thread_rng};
+
 use ethlambda_network_api::{
     InitBlockChain, P2PToBlockChainRef,
     block_chain_to_p2p::{
@@ -24,6 +26,7 @@ use libp2p::{
     request_response::{self, OutboundRequestId},
     swarm::{NetworkBehaviour, SwarmEvent},
 };
+use libp2p_connection_limits::{Behaviour as ConnectionLimitsBehaviour, ConnectionLimits};
 use sha2::Digest;
 use spawned_concurrency::actor;
 use spawned_concurrency::error::ActorError;
@@ -71,6 +74,7 @@ pub(crate) struct PendingRequest {
 pub(crate) struct Behaviour {
     gossipsub: libp2p::gossipsub::Behaviour,
     req_resp: request_response::Behaviour<Codec>,
+    connection_limits: ConnectionLimitsBehaviour,
 }
 
 /// Configuration for building the libp2p swarm.
@@ -82,6 +86,8 @@ pub struct SwarmConfig {
     pub attestation_committee_count: u64,
     pub is_aggregator: bool,
     pub aggregate_subnet_ids: Option<Vec<u64>>,
+    pub max_established_peers: Option<u32>,
+    pub bootnode_sample_size: Option<usize>,
 }
 
 /// Result of building the swarm — contains all pieces needed to start the P2P actor.
@@ -141,9 +147,16 @@ pub fn build_swarm(
         Default::default(),
     );
 
+    let connection_limits = ConnectionLimitsBehaviour::new(
+        ConnectionLimits::default()
+            .with_max_established(config.max_established_peers)
+            .with_max_established_per_peer(Some(1)),
+    );
+
     let behavior = Behaviour {
         gossipsub,
         req_resp,
+        connection_limits,
     };
 
     // TODO: set peer scoring params
@@ -163,8 +176,17 @@ pub fn build_swarm(
         })
         .build();
     let local_peer_id = *swarm.local_peer_id();
+    let mut bootnodes = config.bootnodes;
+    if let Some(sample_size) = config.bootnode_sample_size {
+        if bootnodes.len() > sample_size {
+            let mut rng = thread_rng();
+            bootnodes.shuffle(&mut rng);
+            bootnodes.truncate(sample_size);
+        }
+    }
+
     let mut bootnode_addrs = HashMap::new();
-    for bootnode in config.bootnodes {
+    for bootnode in bootnodes {
         let peer_id = PeerId::from_public_key(&bootnode.public_key);
         if peer_id == local_peer_id {
             continue;

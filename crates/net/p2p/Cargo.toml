@@ -46,6 +46,7 @@ tree_hash = "0.12.0"
 tree_hash_derive = "0.12.0"
 
 sha2 = "0.10"
+libp2p-connection-limits = { git = "https://github.com/lambdaclass/rust-libp2p.git", rev = "cd6cc3b1e5db2c5e23e133c2201c23b063fc4895", package = "libp2p-connection-limits" }
 
 [dev-dependencies]
 hex.workspace = true

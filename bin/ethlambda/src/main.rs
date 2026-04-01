@@ -1,15 +1,6 @@
 mod checkpoint_sync;
 mod version;
 
-#[cfg(not(target_env = "msvc"))]
-#[global_allocator]
-static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
-
-#[cfg(not(target_env = "msvc"))]
-#[allow(non_upper_case_globals)]
-#[unsafe(export_name = "malloc_conf")]
-static malloc_conf: &[u8] = b"prof:true,prof_active:true,lg_prof_sample:19\0";
-
 use std::{
     collections::{BTreeMap, HashMap},
     net::{IpAddr, SocketAddr},
@@ -73,6 +64,12 @@ struct CliOptions {
     /// Requires --is-aggregator. Defaults to the subnets of the node's validators.
     #[arg(long, value_delimiter = ',', requires = "is_aggregator")]
     aggregate_subnet_ids: Option<Vec<u64>>,
+    /// Max established peer connections. If unset, libp2p default behavior applies.
+    #[arg(long)]
+    max_peers: Option<u32>,
+    /// Randomly sample this many bootnodes from nodes.yaml for initial dialing.
+    #[arg(long)]
+    bootnode_sample_size: Option<usize>,
     /// Directory for RocksDB storage
     #[arg(long, default_value = "./data")]
     data_dir: PathBuf,
@@ -104,10 +101,7 @@ async fn main() -> eyre::Result<()> {
     println!("{ASCII_ART}");
 
     info!(version = version::CLIENT_VERSION, "Starting ethlambda");
-    #[cfg(not(target_env = "msvc"))]
-    info!("Using jemalloc allocator with heap profiling enabled");
-    #[cfg(target_env = "msvc")]
-    info!("Using system allocator (MSVC target)");
+    info!("Using system allocator");
 
     info!(node_key=?options.node_key, "got node key");
 
@@ -162,6 +156,8 @@ async fn main() -> eyre::Result<()> {
         attestation_committee_count: options.attestation_committee_count,
         is_aggregator: options.is_aggregator,
         aggregate_subnet_ids: options.aggregate_subnet_ids,
+        max_established_peers: options.max_peers,
+        bootnode_sample_size: options.bootnode_sample_size,
     })
     .expect("failed to build swarm");
 
