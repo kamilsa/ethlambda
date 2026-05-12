@@ -11,9 +11,7 @@ use crate::api::{StorageBackend, StorageWriteBatch, Table};
 
 use ethlambda_types::{
     attestation::{AttestationData, HashedAttestationData, bits_is_subset},
-    block::{
-        AggregatedSignatureProof, Block, BlockBody, BlockHeader, BlockSignatures, SignedBlock,
-    },
+    block::{Block, BlockBody, BlockHeader, ByteListMiB, SignedBlock, TypeOneMultiSignature},
     checkpoint::Checkpoint,
     primitives::{H256, HashTreeRoot as _},
     signature::ValidatorSignature,
@@ -97,14 +95,14 @@ const GOSSIP_SIGNATURE_CAP: usize = 2048;
 #[derive(Clone)]
 struct PayloadEntry {
     data: AttestationData,
-    proofs: Vec<AggregatedSignatureProof>,
+    proofs: Vec<TypeOneMultiSignature>,
 }
 
 /// Fixed-size circular buffer for aggregated payloads.
 ///
 /// Groups proofs by attestation data (via data_root). Each distinct
 /// attestation message stores the full `AttestationData` plus all
-/// `AggregatedSignatureProof`s covering that message.
+/// `TypeOneMultiSignature`s covering that message.
 ///
 /// Entries are evicted FIFO (by insertion order of the data_root)
 /// when the buffer reaches capacity.
@@ -135,19 +133,19 @@ impl PayloadBuffer {
     ///   any existing proof, the incoming proof is redundant and skipped.
     /// - Otherwise, any existing proof whose participants are a strict subset
     ///   of the incoming proof's is removed before inserting.
-    fn push(&mut self, hashed: HashedAttestationData, proof: AggregatedSignatureProof) {
+    fn push(&mut self, hashed: HashedAttestationData, proof: TypeOneMultiSignature) {
         let (data_root, att_data) = hashed.into_parts();
 
         if let Some(entry) = self.data.get_mut(&data_root) {
             let mut to_remove: Vec<usize> = Vec::new();
             for (i, p) in entry.proofs.iter().enumerate() {
                 // Incoming is subsumed by an existing proof (incl. equal). Skip.
-                if bits_is_subset(&proof.participants, &p.participants) {
+                if bits_is_subset(&proof.info.participants, &p.info.participants) {
                     return;
                 }
                 // Existing is a strict subset of incoming. Mark for removal.
                 // (Non-strict equality was ruled out by the check above.)
-                if bits_is_subset(&p.participants, &proof.participants) {
+                if bits_is_subset(&p.info.participants, &proof.info.participants) {
                     to_remove.push(i);
                 }
             }
@@ -184,7 +182,7 @@ impl PayloadBuffer {
     }
 
     /// Insert a batch of (hashed_attestation_data, proof) entries.
-    fn push_batch(&mut self, entries: Vec<(HashedAttestationData, AggregatedSignatureProof)>) {
+    fn push_batch(&mut self, entries: Vec<(HashedAttestationData, TypeOneMultiSignature)>) {
         for (hashed, proof) in entries {
             self.push(hashed, proof);
         }
@@ -196,7 +194,7 @@ impl PayloadBuffer {
     /// like `promote_new_aggregated_payloads` re-insert into known_payloads
     /// deterministically. HashMap iteration would be RandomState-seeded and
     /// produce non-deterministic vote ordering for same-slot equivocation.
-    fn drain(&mut self) -> Vec<(HashedAttestationData, AggregatedSignatureProof)> {
+    fn drain(&mut self) -> Vec<(HashedAttestationData, TypeOneMultiSignature)> {
         self.total_proofs = 0;
         let mut result = Vec::with_capacity(self.data.values().map(|e| e.proofs.len()).sum());
         while let Some(data_root) = self.order.pop_front() {
@@ -220,7 +218,7 @@ impl PayloadBuffer {
     }
 
     /// Return cloned proofs for a given data_root, or empty vec if none.
-    fn proofs_for_root(&self, data_root: &H256) -> Vec<AggregatedSignatureProof> {
+    fn proofs_for_root(&self, data_root: &H256) -> Vec<TypeOneMultiSignature> {
         self.data
             .get(data_root)
             .map_or_else(Vec::new, |e| e.proofs.clone())
@@ -952,16 +950,16 @@ impl Store {
         batch.commit().expect("commit");
     }
 
-    /// Get a signed block by combining header, body, and signatures.
+    /// Get a signed block by combining header, body, and the merged proof.
     ///
     /// Returns None if any of the components are not found.
-    /// Note: Genesis block has no entry in BlockSignatures table.
+    /// Note: Genesis block has no entry in the `BlockSignatures` table.
     pub fn get_signed_block(&self, root: &H256) -> Option<SignedBlock> {
         let view = self.backend.begin_read().expect("read view");
         let key = root.to_ssz();
 
         let header_bytes = view.get(Table::BlockHeaders, &key).expect("get")?;
-        let sig_bytes = view.get(Table::BlockSignatures, &key).expect("get")?;
+        let proof_bytes = view.get(Table::BlockSignatures, &key).expect("get")?;
 
         let header = BlockHeader::from_ssz_bytes(&header_bytes).expect("valid header");
 
@@ -974,11 +972,11 @@ impl Store {
         };
 
         let block = Block::from_header_and_body(header, body);
-        let signature = BlockSignatures::from_ssz_bytes(&sig_bytes).expect("valid signatures");
+        let proof = ByteListMiB::from_ssz_bytes(&proof_bytes).expect("valid block proof");
 
         Some(SignedBlock {
             message: block,
-            signature,
+            proof,
         })
     }
 
@@ -1034,7 +1032,7 @@ impl Store {
     /// Returns a snapshot of known payloads as (AttestationData, Vec<proof>) pairs.
     pub fn known_aggregated_payloads(
         &self,
-    ) -> HashMap<H256, (AttestationData, Vec<AggregatedSignatureProof>)> {
+    ) -> HashMap<H256, (AttestationData, Vec<TypeOneMultiSignature>)> {
         let buf = self.known_payloads.lock().unwrap();
         buf.data
             .iter()
@@ -1069,7 +1067,7 @@ impl Store {
     pub fn existing_proofs_for_data(
         &self,
         data_root: &H256,
-    ) -> (Vec<AggregatedSignatureProof>, Vec<AggregatedSignatureProof>) {
+    ) -> (Vec<TypeOneMultiSignature>, Vec<TypeOneMultiSignature>) {
         let new = self.new_payloads.lock().unwrap().proofs_for_root(data_root);
         let known = self
             .known_payloads
@@ -1091,7 +1089,7 @@ impl Store {
     pub fn insert_known_aggregated_payload(
         &mut self,
         hashed: HashedAttestationData,
-        proof: AggregatedSignatureProof,
+        proof: TypeOneMultiSignature,
     ) {
         self.known_payloads.lock().unwrap().push(hashed, proof);
     }
@@ -1099,7 +1097,7 @@ impl Store {
     /// Batch-insert proofs into the known buffer.
     pub fn insert_known_aggregated_payloads_batch(
         &mut self,
-        entries: Vec<(HashedAttestationData, AggregatedSignatureProof)>,
+        entries: Vec<(HashedAttestationData, TypeOneMultiSignature)>,
     ) {
         self.known_payloads.lock().unwrap().push_batch(entries);
     }
@@ -1113,7 +1111,7 @@ impl Store {
     pub fn insert_new_aggregated_payload(
         &mut self,
         hashed: HashedAttestationData,
-        proof: AggregatedSignatureProof,
+        proof: TypeOneMultiSignature,
     ) {
         self.new_payloads.lock().unwrap().push(hashed, proof);
     }
@@ -1121,7 +1119,7 @@ impl Store {
     /// Batch-insert proofs into the new buffer.
     pub fn insert_new_aggregated_payloads_batch(
         &mut self,
-        entries: Vec<(HashedAttestationData, AggregatedSignatureProof)>,
+        entries: Vec<(HashedAttestationData, TypeOneMultiSignature)>,
     ) {
         self.new_payloads.lock().unwrap().push_batch(entries);
     }
@@ -1210,7 +1208,7 @@ impl Store {
     }
 }
 
-/// Write block header, body, and signatures onto an existing batch.
+/// Write block header, body, and the merged proof blob onto an existing batch.
 ///
 /// Returns the deserialized [`Block`] so callers can access fields like
 /// `slot` and `parent_root` without re-deserializing.
@@ -1221,7 +1219,7 @@ fn write_signed_block(
 ) -> Block {
     let SignedBlock {
         message: block,
-        signature,
+        proof,
     } = signed_block;
 
     let header = block.header();
@@ -1240,10 +1238,12 @@ fn write_signed_block(
             .expect("put block body");
     }
 
-    let sig_entries = vec![(root_bytes, signature.to_ssz())];
+    // Store the merged Type-2 proof blob. Table name kept for the column-family
+    // migration cost; renaming to `BlockProof` is a follow-up.
+    let proof_entries = vec![(root_bytes, proof.to_ssz())];
     batch
-        .put_batch(Table::BlockSignatures, sig_entries)
-        .expect("put block signatures");
+        .put_batch(Table::BlockSignatures, proof_entries)
+        .expect("put block proof");
 
     block
 }
@@ -1626,28 +1626,28 @@ mod tests {
 
     // ============ PayloadBuffer Tests ============
 
-    fn make_proof() -> AggregatedSignatureProof {
+    fn make_proof() -> TypeOneMultiSignature {
         use ethlambda_types::attestation::AggregationBits;
-        AggregatedSignatureProof::empty(AggregationBits::new())
+        TypeOneMultiSignature::empty(AggregationBits::new(), H256::ZERO, 0)
     }
 
     /// Create a proof with a specific validator bit set (distinct participants).
-    fn make_proof_for_validator(vid: usize) -> AggregatedSignatureProof {
+    fn make_proof_for_validator(vid: usize) -> TypeOneMultiSignature {
         use ethlambda_types::attestation::AggregationBits;
         let mut bits = AggregationBits::with_length(vid + 1).unwrap();
         bits.set(vid, true).unwrap();
-        AggregatedSignatureProof::empty(bits)
+        TypeOneMultiSignature::empty(bits, H256::ZERO, 0)
     }
 
     /// Create a proof with bits set for every validator in `vids`.
-    fn make_proof_for_validators(vids: &[u64]) -> AggregatedSignatureProof {
+    fn make_proof_for_validators(vids: &[u64]) -> TypeOneMultiSignature {
         use ethlambda_types::attestation::AggregationBits;
         let max = vids.iter().copied().max().unwrap_or(0) as usize;
         let mut bits = AggregationBits::with_length(max + 1).unwrap();
         for &v in vids {
             bits.set(v as usize, true).unwrap();
         }
-        AggregatedSignatureProof::empty(bits)
+        TypeOneMultiSignature::empty(bits, H256::ZERO, 0)
     }
 
     fn make_att_data(slot: u64) -> AttestationData {
