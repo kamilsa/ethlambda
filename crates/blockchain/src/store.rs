@@ -37,7 +37,7 @@ fn accept_new_attestations(store: &mut Store, log_tree: bool) {
 ///
 /// When `log_tree` is true, also computes block weights and logs an ASCII
 /// fork choice tree to the terminal.
-fn update_head(store: &mut Store, log_tree: bool) {
+pub fn update_head(store: &mut Store, log_tree: bool) {
     let blocks = store.get_live_chain();
     let attestations = store.extract_latest_known_attestations();
     let old_head = store.head();
@@ -413,8 +413,8 @@ pub fn on_block_without_verification(
 
 /// Core block processing logic.
 ///
-/// When `verify` is true, cryptographic signatures are validated and stored
-/// for future block building. When false, all signature checks are skipped.
+/// When `verify` is true, cryptographic signatures are verified.
+/// When false, all signature checks are skipped.
 fn on_block_core(
     store: &mut Store,
     signed_block: SignedBlock,
@@ -495,30 +495,11 @@ fn on_block_core(
     store.insert_signed_block(block_root, signed_block.clone());
     store.insert_state(block_root, post_state);
 
-    // Process block body attestations and feed them into the payload buffer
-    // so fork choice's LMD GHOST overlay can see block-only votes.
-    //
-    // Per-attestation participant bitfields come straight from
-    // `block.body.attestations[i].aggregation_bits`. Standalone Type-1
-    // proof bytes are not recoverable from a block at import time;
-    // downstream re-aggregation has to come from the gossip channel or be
-    // recovered by SNARK-splitting `signed_block.proof` via
-    // `split_type_2_by_message`. The entries inserted here are info-only,
-    // used only for fork-choice vote bookkeeping.
-    let aggregated_attestations = &block.body.attestations;
-
-    let mut known_entries: Vec<(HashedAttestationData, TypeOneMultiSignature)> =
-        Vec::with_capacity(aggregated_attestations.len());
-    for att in aggregated_attestations.iter() {
-        let hashed = HashedAttestationData::new(att.data.clone());
-        let type_one = TypeOneMultiSignature::empty(att.aggregation_bits.clone());
-        known_entries.push((hashed, type_one));
+    for att in block.body.attestations.iter() {
         // Count each participating validator as a valid attestation.
         let count = validator_indices(&att.aggregation_bits).count() as u64;
         metrics::inc_attestations_valid(count);
     }
-
-    store.insert_known_aggregated_payloads_batch(known_entries);
 
     // Update forkchoice head based on new block and attestations
     update_head(store, false);
