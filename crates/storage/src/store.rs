@@ -4,7 +4,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use crate::api::{StorageBackend, StorageWriteBatch, Table};
 
 use ethlambda_types::{
-    attestation::{AttestationData, HashedAttestationData, bits_is_subset, AggregationBits, },
+    attestation::{AggregationBits, AttestationData, HashedAttestationData, bits_is_subset},
     block::{Block, BlockBody, BlockHeader, ByteList512KiB, SignedBlock, TypeOneMultiSignature},
     checkpoint::Checkpoint,
     primitives::{H256, HashTreeRoot as _},
