@@ -2,13 +2,13 @@ mod checkpoint_sync;
 mod version;
 
 #[cfg(not(target_env = "msvc"))]
-#[global_allocator]
-static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+// #[global_allocator]
+// static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[cfg(not(target_env = "msvc"))]
-#[allow(non_upper_case_globals)]
-#[unsafe(export_name = "malloc_conf")]
-static malloc_conf: &[u8] = b"prof:true,prof_active:true,lg_prof_sample:19\0";
+// #[allow(non_upper_case_globals)]
+// #[unsafe(export_name = "malloc_conf")]
+// static malloc_conf: &[u8] = b"prof:true,prof_active:true,lg_prof_sample:19\0";
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -116,7 +116,7 @@ struct CliOptions {
     data_dir: PathBuf,
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> eyre::Result<()> {
     let filter = EnvFilter::builder()
         .with_default_directive(tracing::Level::INFO.into())
@@ -163,7 +163,7 @@ async fn main() -> eyre::Result<()> {
     let p2p_socket = SocketAddr::new(IpAddr::from([0, 0, 0, 0]), options.gossipsub_port);
 
     #[cfg(not(target_env = "msvc"))]
-    info!("Using jemalloc allocator with heap profiling enabled");
+    info!("Using system allocator");
     #[cfg(target_env = "msvc")]
     info!("Using system allocator (MSVC target)");
 

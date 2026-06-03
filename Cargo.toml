@@ -77,3 +77,6 @@ eyre = "0.6"
 tikv-jemallocator = { version = "0.6", features = ["stats", "unprefixed_malloc_on_supported_platforms", "profiling"] }
 jemalloc_pprof = { version = "0.8", features = ["flamegraph"] }
 
+
+[patch.crates-io]
+quinn-udp = { path = "./patches/quinn-udp" }

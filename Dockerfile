@@ -10,9 +10,11 @@ RUN apt-get update && apt-get -y upgrade && apt-get install -y libclang-dev pkg-
 # Builds a cargo-chef plan
 FROM chef AS planner
 COPY --exclude=.git --exclude=target . .
+COPY patches patches
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
+COPY patches patches
 COPY --from=planner /app/recipe.json recipe.json
 
 # Include .cargo/ so [target.*.rustflags] (e.g. -Ctarget-cpu=x86-64-v3) applies to
