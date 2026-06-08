@@ -466,6 +466,15 @@ async fn handle_swarm_event(
         )) => {
             gossipsub::handle_gossipsub_message(server, message).await;
         }
+        SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
+            libp2p::gossipsub::Event::RawMessageReceived {
+                topic,
+                raw_protobuf_len,
+                ..
+            },
+        )) => {
+            gossipsub::handle_raw_gossipsub_message(&topic, raw_protobuf_len);
+        }
         SwarmEvent::ConnectionEstablished {
             peer_id,
             endpoint,

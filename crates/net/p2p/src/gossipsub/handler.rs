@@ -17,6 +17,25 @@ use super::{
 };
 use crate::{P2PServer, metrics};
 
+fn message_kind_from_topic(topic: &str) -> &'static str {
+    match topic.split("/").nth(3) {
+        Some(BLOCK_TOPIC_KIND) => "block",
+        Some(AGGREGATION_TOPIC_KIND) => "aggregation",
+        Some(kind) if kind.starts_with(ATTESTATION_SUBNET_TOPIC_PREFIX) => "attestation",
+        _ => "unknown",
+    }
+}
+
+pub fn handle_raw_gossipsub_message(topic: &libp2p::gossipsub::TopicHash, bytes: usize) {
+    metrics::record_p2p_bandwidth(
+        "in",
+        "gossip",
+        message_kind_from_topic(topic.as_str()),
+        bytes,
+        "unfiltered",
+    );
+}
+
 pub async fn handle_gossipsub_message(server: &mut P2PServer, event: Event) {
     let Event::Message {
         propagation_source: _,
@@ -27,9 +46,8 @@ pub async fn handle_gossipsub_message(server: &mut P2PServer, event: Event) {
         unreachable!("we already matched on Message variant in handle_swarm_event");
     };
     let peer_count = server.connected_peers.len();
-    let topic_kind = message.topic.as_str().split("/").nth(3);
-    match topic_kind {
-        Some(BLOCK_TOPIC_KIND) => {
+    match message_kind_from_topic(message.topic.as_str()) {
+        "block" => {
             info!(kind = "block", peer_count, "P2P message received");
             let compressed_len = message.data.len();
             let Ok(uncompressed_data) = decompress_message(&message.data)
@@ -63,7 +81,7 @@ pub async fn handle_gossipsub_message(server: &mut P2PServer, event: Event) {
                     .inspect_err(|err| error!(%err, "Failed to forward block to blockchain"));
             }
         }
-        Some(AGGREGATION_TOPIC_KIND) => {
+        "aggregation" => {
             info!(kind = "aggregation", peer_count, "P2P message received");
             let compressed_len = message.data.len();
             let Ok(uncompressed_data) = decompress_message(&message.data)
@@ -95,7 +113,7 @@ pub async fn handle_gossipsub_message(server: &mut P2PServer, event: Event) {
                     );
             }
         }
-        Some(kind) if kind.starts_with(ATTESTATION_SUBNET_TOPIC_PREFIX) => {
+        "attestation" => {
             info!(kind = "attestation", peer_count, "P2P message received");
             let compressed_len = message.data.len();
             let Ok(uncompressed_data) = decompress_message(&message.data)
@@ -146,6 +164,14 @@ pub async fn publish_attestation(server: &mut P2PServer, attestation: SignedAtte
     let compressed = compress_message(&ssz_bytes);
 
     metrics::observe_gossip_attestation_size(ssz_bytes.len(), compressed.len());
+    metrics::record_p2p_bandwidth_for_slot(
+        "out",
+        "gossip",
+        "attestation",
+        compressed.len(),
+        "sent",
+        slot,
+    );
 
     // Look up subscribed topic or construct on-the-fly for gossipsub fanout
     let topic = server
@@ -181,6 +207,14 @@ pub async fn publish_block(server: &mut P2PServer, signed_block: SignedBlock) {
     let compressed = compress_message(&ssz_bytes);
 
     metrics::observe_gossip_block_size(ssz_bytes.len(), compressed.len());
+    metrics::record_p2p_bandwidth_for_slot(
+        "out",
+        "gossip",
+        "block",
+        compressed.len(),
+        "sent",
+        slot,
+    );
 
     // Publish to gossipsub
     server
@@ -209,6 +243,14 @@ pub async fn publish_aggregated_attestation(
     let compressed = compress_message(&ssz_bytes);
 
     metrics::observe_gossip_aggregation_size(ssz_bytes.len(), compressed.len());
+    metrics::record_p2p_bandwidth_for_slot(
+        "out",
+        "gossip",
+        "aggregation",
+        compressed.len(),
+        "sent",
+        slot,
+    );
 
     // Publish to the aggregation topic
     server

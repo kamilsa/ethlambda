@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 default-members = ["bin/ethlambda"]
+exclude = ["patches/rust-libp2p"]
 members = [
     "bin/ethlambda",
     "crates/blockchain",
@@ -80,3 +81,11 @@ jemalloc_pprof = { version = "0.8", features = ["flamegraph"] }
 
 [patch.crates-io]
 quinn-udp = { path = "./patches/quinn-udp" }
+
+[patch."https://github.com/lambdaclass/rust-libp2p.git"]
+libp2p-core = { path = "./patches/rust-libp2p/core" }
+libp2p-gossipsub = { path = "./patches/rust-libp2p/protocols/gossipsub" }
+libp2p-swarm = { path = "./patches/rust-libp2p/swarm" }
+multistream-select = { path = "./patches/rust-libp2p/misc/multistream-select" }
+quick-protobuf-codec = { path = "./patches/rust-libp2p/misc/quick-protobuf-codec" }
+rw-stream-sink = { path = "./patches/rust-libp2p/misc/rw-stream-sink" }
