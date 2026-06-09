@@ -129,8 +129,8 @@ pub fn build_swarm(
         .fanout_ttl(Duration::from_secs(60))
         .history_length(6)
         .history_gossip(3)
-        // seen_ttl_secs = seconds_per_slot * justification_lookback_slots * 2
-        .duplicate_cache_time(Duration::from_secs(4 * 3 * 2))
+        // Extended cache to reduce redundant deliveries
+        .duplicate_cache_time(Duration::from_secs(120))
         .validation_mode(ValidationMode::Anonymous)
         .message_id_fn(compute_message_id)
         // Taken from ream
