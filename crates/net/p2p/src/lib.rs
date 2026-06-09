@@ -123,9 +123,10 @@ pub fn build_swarm(
         .mesh_n_low(6)
         // d_high
         .mesh_n_high(12)
-        // d_lazy
-        .gossip_lazy(6)
-        .heartbeat_interval(Duration::from_millis(700))
+        // d_lazy — increased for faster propagation, fewer redundant IWANTs
+        .gossip_lazy(12)
+        .gossip_factor(0.5)
+        .heartbeat_interval(Duration::from_millis(500))
         .fanout_ttl(Duration::from_secs(60))
         .history_length(6)
         .history_gossip(3)
