@@ -123,9 +123,9 @@ pub fn build_swarm(
         .mesh_n_low(6)
         // d_high
         .mesh_n_high(12)
-        // d_lazy — disable IHAVE messages entirely
-        .gossip_lazy(0)
-        .gossip_factor(0.0)
+        // d_lazy
+        .gossip_lazy(6)
+        .gossip_factor(0.25)
         .heartbeat_interval(Duration::from_millis(700))
         .fanout_ttl(Duration::from_secs(60))
         .history_length(6)
@@ -138,7 +138,10 @@ pub fn build_swarm(
         .max_transmit_size(MAX_COMPRESSED_PAYLOAD_SIZE)
         .max_messages_per_rpc(Some(500))
         .allow_self_origin(true)
-        .flood_publish(true)
+        .flood_publish(false)
+        .idontwant_on_publish(true)
+        .max_ihave_length(1000)
+        .iwant_followup_time(Duration::from_secs(1))
         .idontwant_message_size_threshold(1000)
         .build()
         .expect("invalid gossipsub config");
