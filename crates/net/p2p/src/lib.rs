@@ -124,8 +124,9 @@ pub fn build_swarm(
         // d_high
         .mesh_n_high(12)
         // d_lazy
-        .gossip_lazy(6)
-        .heartbeat_interval(Duration::from_millis(700))
+        .gossip_lazy(3)
+        .gossip_factor(0.1)
+        .heartbeat_interval(Duration::from_millis(2000))
         .fanout_ttl(Duration::from_secs(60))
         .history_length(6)
         .history_gossip(3)
@@ -137,6 +138,7 @@ pub fn build_swarm(
         .max_transmit_size(MAX_COMPRESSED_PAYLOAD_SIZE)
         .max_messages_per_rpc(Some(500))
         .allow_self_origin(true)
+        .flood_publish(false)
         .idontwant_message_size_threshold(1000)
         .build()
         .expect("invalid gossipsub config");
