@@ -5,6 +5,7 @@ use std::sync::LazyLock;
 
 use ethlambda_metrics::*;
 use libp2p::PeerId;
+use tracing::info;
 
 static LEAN_CONNECTED_PEERS: LazyLock<IntGaugeVec> = LazyLock::new(|| {
     register_int_gauge_vec!(
@@ -41,6 +42,48 @@ static LEAN_PEER_DISCONNECTION_EVENTS_TOTAL: LazyLock<IntCounterVec> = LazyLock:
     )
     .unwrap()
 });
+
+static LEAN_P2P_BANDWIDTH_BYTES_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    register_int_counter_vec!(
+        "lean_p2p_bandwidth_bytes_total",
+        "Total P2P protocol-layer bytes observed by ethlambda",
+        &["direction", "protocol", "message_kind", "delivery"]
+    )
+    .unwrap()
+});
+
+pub fn record_p2p_bandwidth(
+    direction: &'static str,
+    protocol: &'static str,
+    message_kind: &'static str,
+    bytes: usize,
+    delivery: &'static str,
+) {
+    LEAN_P2P_BANDWIDTH_BYTES_TOTAL
+        .with_label_values(&[direction, protocol, message_kind, delivery])
+        .inc_by(bytes as u64);
+    info!(
+        direction,
+        protocol, message_kind, bytes, delivery, "P2P bandwidth event"
+    );
+}
+
+pub fn record_p2p_bandwidth_for_slot(
+    direction: &'static str,
+    protocol: &'static str,
+    message_kind: &'static str,
+    bytes: usize,
+    delivery: &'static str,
+    consensus_slot: u64,
+) {
+    LEAN_P2P_BANDWIDTH_BYTES_TOTAL
+        .with_label_values(&[direction, protocol, message_kind, delivery])
+        .inc_by(bytes as u64);
+    info!(
+        direction,
+        protocol, message_kind, bytes, delivery, consensus_slot, "P2P bandwidth event"
+    );
+}
 
 // --- Gossip Message Size Histograms ---
 //

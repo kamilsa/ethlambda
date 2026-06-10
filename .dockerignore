@@ -9,4 +9,5 @@
 !LICENSE
 !.git/
 !.cargo/
+!patches/
 !shadow/

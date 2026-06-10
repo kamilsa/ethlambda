@@ -20,6 +20,10 @@ COPY --from=planner /app/recipe.json recipe.json
 # cached deps are compiled with default flags and cargo reuses them.
 COPY .cargo/ .cargo/
 
+# Patched crates must be available for cargo-chef's dependency resolution,
+# since [patch] entries in Cargo.toml point to local paths under patches/.
+COPY patches/ patches/
+
 # Build profile, release by default
 ARG BUILD_PROFILE=release
 ENV BUILD_PROFILE=$BUILD_PROFILE

@@ -26,6 +26,28 @@ fn protocol_label(protocol: &str) -> &'static str {
     }
 }
 
+fn request_message_kind(protocol: &str) -> &'static str {
+    match protocol {
+        "status" => "status_request",
+        "blocks_by_root" => "blocks_by_root_request",
+        "blocks_by_range" => "blocks_by_range_request",
+        _ => "unknown_request",
+    }
+}
+
+fn response_message_kind(protocol: &str) -> &'static str {
+    match protocol {
+        "status" => "status_response",
+        "blocks_by_root" => "blocks_by_root_response",
+        "blocks_by_range" => "blocks_by_range_response",
+        _ => "unknown_response",
+    }
+}
+
+fn response_bandwidth_bytes(compressed_size: usize) -> usize {
+    compressed_size + 1
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Codec;
 
@@ -46,6 +68,13 @@ impl libp2p::request_response::Codec for Codec {
         let payload = decoded.uncompressed;
         let label = protocol_label(protocol.as_ref());
         metrics::observe_reqresp_request_size(label, payload.len(), decoded.compressed_size);
+        metrics::record_p2p_bandwidth(
+            "in",
+            "reqresp",
+            request_message_kind(label),
+            decoded.compressed_size,
+            "decoded",
+        );
 
         match protocol.as_ref() {
             STATUS_PROTOCOL_V1 => {
@@ -114,6 +143,13 @@ impl libp2p::request_response::Codec for Codec {
         let compressed_size = write_payload(io, &encoded).await?;
         let label = protocol_label(protocol.as_ref());
         metrics::observe_reqresp_request_size(label, encoded.len(), compressed_size);
+        metrics::record_p2p_bandwidth(
+            "out",
+            "reqresp",
+            request_message_kind(label),
+            compressed_size,
+            "decoded",
+        );
         Ok(())
     }
 
@@ -140,6 +176,13 @@ impl libp2p::request_response::Codec for Codec {
                             encoded.len(),
                             compressed_size,
                         );
+                        metrics::record_p2p_bandwidth(
+                            "out",
+                            "reqresp",
+                            response_message_kind(label),
+                            response_bandwidth_bytes(compressed_size),
+                            "decoded",
+                        );
                         Ok(())
                     }
                     ResponsePayload::Blocks(blocks) => {
@@ -164,6 +207,13 @@ impl libp2p::request_response::Codec for Codec {
                                 encoded.len(),
                                 compressed_size,
                             );
+                            metrics::record_p2p_bandwidth(
+                                "out",
+                                "reqresp",
+                                response_message_kind(label),
+                                response_bandwidth_bytes(compressed_size),
+                                "decoded",
+                            );
                         }
                         // Empty response if no blocks found (stream just ends)
                         Ok(())
@@ -179,6 +229,13 @@ impl libp2p::request_response::Codec for Codec {
 
                 let compressed_size = write_payload(io, &encoded).await?;
                 metrics::observe_reqresp_response_chunk_size(label, encoded.len(), compressed_size);
+                metrics::record_p2p_bandwidth(
+                    "out",
+                    "reqresp",
+                    response_message_kind(label),
+                    response_bandwidth_bytes(compressed_size),
+                    "decoded",
+                );
                 Ok(())
             }
         }
@@ -221,6 +278,13 @@ where
         protocol_label,
         payload.len(),
         decoded.compressed_size,
+    );
+    metrics::record_p2p_bandwidth(
+        "in",
+        "reqresp",
+        response_message_kind(protocol_label),
+        response_bandwidth_bytes(decoded.compressed_size),
+        "decoded",
     );
 
     if code != ResponseCode::SUCCESS {
@@ -287,6 +351,13 @@ where
             payload.len(),
             decoded.compressed_size,
         );
+        metrics::record_p2p_bandwidth(
+            "in",
+            "reqresp",
+            response_message_kind(protocol_label),
+            response_bandwidth_bytes(decoded.compressed_size),
+            "decoded",
+        );
 
         if code != ResponseCode::SUCCESS {
             let error_message = ErrorMessage::from_ssz_bytes(&payload)
@@ -302,4 +373,136 @@ where
     }
 
     Ok(Response::success(ResponsePayload::Blocks(blocks)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::req_resp::{
+        BlocksByRangeRequest,
+        encoding::{decode_payload, write_payload},
+    };
+    use ethlambda_types::{checkpoint::Checkpoint, primitives::H256};
+    use futures::io::Cursor;
+    use libp2p::{StreamProtocol, request_response::Codec as _};
+
+    fn bandwidth_counter_value(
+        direction: &str,
+        protocol: &str,
+        message_kind: &str,
+        delivery: &str,
+    ) -> u64 {
+        for family in ethlambda_metrics::gather() {
+            if family.name() != "lean_p2p_bandwidth_bytes_total" {
+                continue;
+            }
+            for metric in family.get_metric() {
+                let mut matches = 0;
+                for label in metric.get_label() {
+                    let expected = match label.name() {
+                        "direction" => direction,
+                        "protocol" => protocol,
+                        "message_kind" => message_kind,
+                        "delivery" => delivery,
+                        _ => continue,
+                    };
+                    if label.value() == expected {
+                        matches += 1;
+                    }
+                }
+                if matches == 4 {
+                    return metric
+                        .get_counter()
+                        .as_ref()
+                        .map(|counter| counter.value() as u64)
+                        .unwrap_or(0);
+                }
+            }
+        }
+        0
+    }
+
+    fn status() -> Status {
+        Status {
+            finalized: Checkpoint {
+                root: H256::ZERO,
+                slot: 1,
+            },
+            head: Checkpoint {
+                root: H256::ZERO,
+                slot: 2,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn request_accounting_uses_compressed_payload_bytes() {
+        let protocol = StreamProtocol::new(BLOCKS_BY_RANGE_PROTOCOL_V1);
+        let request = Request::BlocksByRange(BlocksByRangeRequest {
+            start_slot: 10,
+            count: 3,
+        });
+
+        let before =
+            bandwidth_counter_value("out", "reqresp", "blocks_by_range_request", "decoded");
+        let mut written = Cursor::new(Vec::new());
+        Codec
+            .write_request(&protocol, &mut written, request.clone())
+            .await
+            .unwrap();
+
+        let mut read_written = Cursor::new(written.into_inner());
+        let decoded = decode_payload(&mut read_written).await.unwrap();
+        let after = bandwidth_counter_value("out", "reqresp", "blocks_by_range_request", "decoded");
+        assert_eq!(after - before, decoded.compressed_size as u64);
+
+        let mut encoded_request = Cursor::new(Vec::new());
+        let request_payload = match &request {
+            Request::BlocksByRange(request) => request.to_ssz(),
+            _ => unreachable!("test uses a blocks_by_range request"),
+        };
+        let compressed_size = write_payload(&mut encoded_request, &request_payload)
+            .await
+            .unwrap();
+        let before = bandwidth_counter_value("in", "reqresp", "blocks_by_range_request", "decoded");
+        let decoded_request = Codec
+            .read_request(&protocol, &mut Cursor::new(encoded_request.into_inner()))
+            .await
+            .unwrap();
+        let after = bandwidth_counter_value("in", "reqresp", "blocks_by_range_request", "decoded");
+
+        assert!(matches!(decoded_request, Request::BlocksByRange(_)));
+        assert_eq!(after - before, compressed_size as u64);
+    }
+
+    #[tokio::test]
+    async fn response_accounting_includes_response_code_byte() {
+        let protocol = StreamProtocol::new(STATUS_PROTOCOL_V1);
+        let response = Response::success(ResponsePayload::Status(status()));
+
+        let before = bandwidth_counter_value("out", "reqresp", "status_response", "decoded");
+        let mut written = Cursor::new(Vec::new());
+        Codec
+            .write_response(&protocol, &mut written, response)
+            .await
+            .unwrap();
+        let written = written.into_inner();
+        assert_eq!(written[0], u8::from(ResponseCode::SUCCESS));
+
+        let mut payload = Cursor::new(written[1..].to_vec());
+        let decoded = decode_payload(&mut payload).await.unwrap();
+        let expected_bytes = response_bandwidth_bytes(decoded.compressed_size) as u64;
+        let after = bandwidth_counter_value("out", "reqresp", "status_response", "decoded");
+        assert_eq!(after - before, expected_bytes);
+
+        let before = bandwidth_counter_value("in", "reqresp", "status_response", "decoded");
+        let decoded_response = Codec
+            .read_response(&protocol, &mut Cursor::new(written))
+            .await
+            .unwrap();
+        let after = bandwidth_counter_value("in", "reqresp", "status_response", "decoded");
+
+        assert!(matches!(decoded_response, Response::Success { .. }));
+        assert_eq!(after - before, expected_bytes);
+    }
 }

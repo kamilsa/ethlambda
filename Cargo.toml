@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 default-members = ["bin/ethlambda"]
+exclude = ["patches/rust-libp2p"]
 members = [
     "bin/ethlambda",
     "crates/blockchain",
@@ -83,3 +84,10 @@ jemalloc_pprof = { version = "0.8", features = ["flamegraph"] }
 # cannot be feature-gated, so it is NOT committed here; `shadow/build.sh` injects
 # it into this manifest at build time. See `make shadow-build`.
 
+[patch."https://github.com/lambdaclass/rust-libp2p.git"]
+libp2p-core = { path = "./patches/rust-libp2p/core" }
+libp2p-gossipsub = { path = "./patches/rust-libp2p/protocols/gossipsub" }
+libp2p-swarm = { path = "./patches/rust-libp2p/swarm" }
+multistream-select = { path = "./patches/rust-libp2p/misc/multistream-select" }
+quick-protobuf-codec = { path = "./patches/rust-libp2p/misc/quick-protobuf-codec" }
+rw-stream-sink = { path = "./patches/rust-libp2p/misc/rw-stream-sink" }

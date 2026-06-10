@@ -3918,7 +3918,6 @@ dependencies = [
 [[package]]
 name = "libp2p-core"
 version = "0.44.0"
-source = "git+https://github.com/lambdaclass/rust-libp2p.git?rev=2f14d0ec9665a01cfb6a02326c90628c4bba521c#2f14d0ec9665a01cfb6a02326c90628c4bba521c"
 dependencies = [
  "either",
  "fnv",
@@ -3998,7 +3997,6 @@ dependencies = [
 [[package]]
 name = "libp2p-gossipsub"
 version = "0.50.0"
-source = "git+https://github.com/lambdaclass/rust-libp2p.git?rev=2f14d0ec9665a01cfb6a02326c90628c4bba521c#2f14d0ec9665a01cfb6a02326c90628c4bba521c"
 dependencies = [
  "async-channel",
  "asynchronous-codec",
@@ -4300,7 +4298,6 @@ dependencies = [
 [[package]]
 name = "libp2p-swarm"
 version = "0.48.0"
-source = "git+https://github.com/lambdaclass/rust-libp2p.git?rev=2f14d0ec9665a01cfb6a02326c90628c4bba521c#2f14d0ec9665a01cfb6a02326c90628c4bba521c"
 dependencies = [
  "either",
  "fnv",
@@ -4323,7 +4320,6 @@ dependencies = [
 [[package]]
 name = "libp2p-swarm-derive"
 version = "0.36.0"
-source = "git+https://github.com/lambdaclass/rust-libp2p.git?rev=2f14d0ec9665a01cfb6a02326c90628c4bba521c#2f14d0ec9665a01cfb6a02326c90628c4bba521c"
 dependencies = [
  "heck",
  "quote",
@@ -4971,7 +4967,6 @@ dependencies = [
 [[package]]
 name = "multistream-select"
 version = "0.14.0"
-source = "git+https://github.com/lambdaclass/rust-libp2p.git?rev=2f14d0ec9665a01cfb6a02326c90628c4bba521c#2f14d0ec9665a01cfb6a02326c90628c4bba521c"
 dependencies = [
  "bytes",
  "futures",
@@ -6108,7 +6103,6 @@ dependencies = [
 [[package]]
 name = "quick-protobuf-codec"
 version = "0.4.0"
-source = "git+https://github.com/lambdaclass/rust-libp2p.git?rev=2f14d0ec9665a01cfb6a02326c90628c4bba521c#2f14d0ec9665a01cfb6a02326c90628c4bba521c"
 dependencies = [
  "asynchronous-codec",
  "bytes",
@@ -6771,7 +6765,6 @@ dependencies = [
 [[package]]
 name = "rw-stream-sink"
 version = "0.5.0"
-source = "git+https://github.com/lambdaclass/rust-libp2p.git?rev=2f14d0ec9665a01cfb6a02326c90628c4bba521c#2f14d0ec9665a01cfb6a02326c90628c4bba521c"
 dependencies = [
  "futures",
  "pin-project",
