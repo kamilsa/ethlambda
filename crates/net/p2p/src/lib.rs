@@ -18,7 +18,7 @@ use ethrex_rlp::decode::RLPDecode;
 use futures::StreamExt;
 use libp2p::{
     Multiaddr, StreamProtocol,
-    gossipsub::{MessageAuthenticity, ValidationMode},
+    gossipsub::{MessageAuthenticity, TopicHash, ValidationMode},
     identity::{Keypair, PublicKey, secp256k1},
     multiaddr::Protocol,
     request_response::{self, OutboundRequestId},
@@ -110,6 +110,7 @@ pub struct BuiltSwarm {
     pub(crate) block_topic: libp2p::gossipsub::IdentTopic,
     pub(crate) aggregation_topic: libp2p::gossipsub::IdentTopic,
     pub(crate) bootnode_addrs: HashMap<PeerId, Multiaddr>,
+    pub(crate) local_peer_id: PeerId,
 }
 
 /// Build and configure the libp2p swarm, dial bootnodes, subscribe to topics.
@@ -266,7 +267,7 @@ pub fn build_swarm(
         attestation_topics.insert(subnet_id, topic);
     }
 
-    info!(socket=%config.listening_socket, "P2P node started");
+    info!(socket=%config.listening_socket, %local_peer_id, "P2P node started");
 
     Ok(BuiltSwarm {
         swarm,
@@ -275,6 +276,7 @@ pub fn build_swarm(
         block_topic,
         aggregation_topic,
         bootnode_addrs,
+        local_peer_id,
     })
 }
 
@@ -299,6 +301,7 @@ impl P2P {
             attestation_committee_count: built.attestation_committee_count,
             block_topic: built.block_topic,
             aggregation_topic: built.aggregation_topic,
+            local_peer_id: built.local_peer_id,
             connected_peers: HashSet::new(),
             pending_requests: HashMap::new(),
             request_id_map: HashMap::new(),
@@ -334,6 +337,7 @@ pub struct P2PServer {
     pub(crate) attestation_committee_count: u64,
     pub(crate) block_topic: libp2p::gossipsub::IdentTopic,
     pub(crate) aggregation_topic: libp2p::gossipsub::IdentTopic,
+    pub(crate) local_peer_id: PeerId,
 
     pub(crate) connected_peers: HashSet<PeerId>,
     pub(crate) pending_requests: HashMap<H256, PendingRequest>,
@@ -704,17 +708,24 @@ fn connection_direction(endpoint: &libp2p::core::ConnectedPoint) -> &'static str
 }
 
 fn compute_message_id(message: &libp2p::gossipsub::Message) -> libp2p::gossipsub::MessageId {
+    compute_message_id_from_parts(&message.topic, &message.data)
+}
+
+pub(crate) fn compute_message_id_from_parts(
+    topic: &TopicHash,
+    data: &[u8],
+) -> libp2p::gossipsub::MessageId {
     const MESSAGE_DOMAIN_INVALID_SNAPPY: [u8; 4] = [0x00, 0x00, 0x00, 0x00];
     const MESSAGE_DOMAIN_VALID_SNAPPY: [u8; 4] = [0x01, 0x00, 0x00, 0x00];
 
     let mut hasher = sha2::Sha256::new();
-    let decompressed = gossipsub::decompress_message(&message.data).ok();
+    let decompressed = gossipsub::decompress_message(data).ok();
 
     let (domain, data) = match decompressed.as_deref() {
         Some(data) => (MESSAGE_DOMAIN_VALID_SNAPPY, data),
-        None => (MESSAGE_DOMAIN_INVALID_SNAPPY, message.data.as_slice()),
+        None => (MESSAGE_DOMAIN_INVALID_SNAPPY, data),
     };
-    let topic = message.topic.as_str().as_bytes();
+    let topic = topic.as_str().as_bytes();
     let topic_len = (topic.len() as u64).to_le_bytes();
     hasher.update(domain);
     hasher.update(topic_len);

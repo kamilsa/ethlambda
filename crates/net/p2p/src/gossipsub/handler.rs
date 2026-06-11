@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use ethlambda_types::{
     ShortRoot,
     attestation::{SignedAggregatedAttestation, SignedAttestation},
@@ -16,6 +18,19 @@ use super::{
     },
 };
 use crate::{P2PServer, metrics};
+
+fn participant_subnets(
+    attestation: &SignedAggregatedAttestation,
+    attestation_committee_count: u64,
+) -> Vec<u64> {
+    attestation
+        .proof
+        .participant_indices()
+        .map(|validator| validator % attestation_committee_count)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
 
 fn message_kind_from_topic(topic: &str) -> &'static str {
     match topic.split("/").nth(3) {
@@ -38,8 +53,8 @@ pub fn handle_raw_gossipsub_message(topic: &libp2p::gossipsub::TopicHash, bytes:
 
 pub async fn handle_gossipsub_message(server: &mut P2PServer, event: Event) {
     let Event::Message {
-        propagation_source: _,
-        message_id: _,
+        propagation_source,
+        message_id,
         message,
     } = event
     else {
@@ -97,12 +112,33 @@ pub async fn handle_gossipsub_message(server: &mut P2PServer, event: Event) {
                 return;
             };
             let slot = aggregation.data.slot;
+            let data_root = aggregation.data.hash_tree_root();
+            let participant_count = aggregation.proof.participants.count_ones();
+            let participant_subnets =
+                participant_subnets(&aggregation, server.attestation_committee_count);
+            let local_peer_id = server.local_peer_id;
+            let local_node = server.resolve_node_name(Some(&local_peer_id));
+            let propagation_source_node = server.resolve_node_name(Some(&propagation_source));
             info!(
+                event = "aggregation_received",
                 %slot,
+                %message_id,
+                %local_peer_id,
+                local_node,
+                propagation_source = %propagation_source,
+                propagation_source_node,
+                message_source = ?message.source,
+                data_root = %data_root,
+                head_slot = aggregation.data.head.slot,
+                head_root = %aggregation.data.head.root,
                 target_slot = aggregation.data.target.slot,
-                target_root = %ShortRoot(&aggregation.data.target.root.0),
+                target_root = %aggregation.data.target.root,
                 source_slot = aggregation.data.source.slot,
-                source_root = %ShortRoot(&aggregation.data.source.root.0),
+                source_root = %aggregation.data.source.root,
+                participant_count,
+                participant_subnets = ?participant_subnets,
+                uncompressed_len = uncompressed_data.len(),
+                compressed_len,
                 "Received aggregated attestation from gossip"
             );
             if let Some(ref blockchain) = server.blockchain {
@@ -241,13 +277,21 @@ pub async fn publish_aggregated_attestation(
 
     // Compress with raw snappy
     let compressed = compress_message(&ssz_bytes);
+    let compressed_len = compressed.len();
+    let topic_hash = server.aggregation_topic.hash();
+    let message_id = crate::compute_message_id_from_parts(&topic_hash, &compressed);
+    let data_root = attestation.data.hash_tree_root();
+    let participant_count = attestation.proof.participants.count_ones();
+    let participant_subnets = participant_subnets(&attestation, server.attestation_committee_count);
+    let local_peer_id = server.local_peer_id;
+    let local_node = server.resolve_node_name(Some(&local_peer_id));
 
-    metrics::observe_gossip_aggregation_size(ssz_bytes.len(), compressed.len());
+    metrics::observe_gossip_aggregation_size(ssz_bytes.len(), compressed_len);
     metrics::record_p2p_bandwidth_for_slot(
         "out",
         "gossip",
         "aggregation",
-        compressed.len(),
+        compressed_len,
         "sent",
         slot,
     );
@@ -257,11 +301,23 @@ pub async fn publish_aggregated_attestation(
         .swarm_handle
         .publish(server.aggregation_topic.clone(), compressed);
     info!(
+        event = "aggregation_published",
         %slot,
+        %message_id,
+        %local_peer_id,
+        local_node,
+        topic = %topic_hash,
+        data_root = %data_root,
+        head_slot = attestation.data.head.slot,
+        head_root = %attestation.data.head.root,
         target_slot = attestation.data.target.slot,
-        target_root = %ShortRoot(&attestation.data.target.root.0),
+        target_root = %attestation.data.target.root,
         source_slot = attestation.data.source.slot,
-        source_root = %ShortRoot(&attestation.data.source.root.0),
+        source_root = %attestation.data.source.root,
+        participant_count,
+        participant_subnets = ?participant_subnets,
+        uncompressed_len = ssz_bytes.len(),
+        compressed_len,
         "Published aggregated attestation to gossipsub"
     );
 }
